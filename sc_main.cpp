@@ -1,3 +1,4 @@
+#include <time.h> 
 #include<systemc>
 #include <uvm>
 
@@ -36,32 +37,35 @@ namespace uvm {
         bool    sugar_free;
 
         public:
-        jelly_bean_transaction(const std::string& name_ = "jelly_bean_seq_item" ) : uvm_sequence_item( name_ )
-        { 
-            // printf("Jelly Bean\n"); 
-        };
+        jelly_bean_transaction(const std::string& name_ = "jelly_bean_seq_item" ) : uvm_sequence_item( name_ )    {};
 
         UVM_OBJECT_UTILS(jelly_bean_transaction);
 
+        //randomise
+        void randomize()
+        {
+            srand (time(NULL));
+            flavor  = static_cast<Flavor>   (rand() % 5 );
+            color   = static_cast<Color>    (rand() % 3 );
+            taste   = static_cast<Taste>    (rand() % 3 );
+            sugar_free =  (rand() % 2 );
+        }
 
-            // Print method
-        virtual void do_print(const uvm_printer& printer) const override {
+        // Print method
+        virtual void do_print(const uvm_printer& printer) const override 
+        {
             printer.print_field_int("Flavor",static_cast<int>(flavor));
             printer.print_field_int("Color", static_cast<int>(color));
             printer.print_field_int("Taste", static_cast<int>(taste));
             printer.print_field_int("Sugar", sugar_free);
         }
-
     };
 
     class sugar_free_jelly_bean_transaction : public jelly_bean_transaction
     {
         public:
         sugar_free_jelly_bean_transaction (const std::string& name_ = "no_sugar_jelly_bean_seq_item" ) : jelly_bean_transaction(name_)
-        { 
-            sugar_free = 1;
-            // printf("Sugar free\n"); 
-        };
+        { sugar_free = 1; };
     };
 
 // ------------------------
@@ -87,29 +91,18 @@ namespace uvm {
         void body()
         {
             RSP  * rsp = new RSP();
+
             jelly_bean_transaction * jb_tx;
             jb_tx           = new REQ();
-            jb_tx->color    = Color::BLUE;
-            jb_tx->flavor   = Flavor::APPLE;
-            jb_tx->taste    = Taste::YUCKY;
 
-            UVM_INFO(this->get_name(), "Waiting for grant", uvm::UVM_NONE);
             this->wait_for_grant(); // this->start_item(jb_tx);
-            
+            jb_tx->randomize();
             this->send_request(jb_tx); // this->finish_item(jb_tx);
             UVM_INFO(this->get_name(), "Sent request", uvm::UVM_NONE);
             jb_tx->print();
-
             this->get_response(rsp);
 
-            std::ostringstream str;
-            str << " my_id %d" << my_id;
-
-            UVM_INFO(this->get_name(), str.str(), uvm::UVM_NONE);
-            printf(" my_id %d", my_id);
-
             delete jb_tx;
-
         }
     };
 
@@ -120,7 +113,7 @@ namespace uvm {
     class same_flavored_jelly_beans_sequence  : public uvm_sequence<REQ,RSP>
     {
         private:
-            int num_jelly_beans;
+            int num_jelly_beans = 5;
             int my_id;
             static int g_my_id;
         
@@ -128,32 +121,30 @@ namespace uvm {
         same_flavored_jelly_beans_sequence( const std::string& name_ ) : uvm::uvm_sequence<REQ,RSP>( name_ )
         {
             my_id = g_my_id++;
-            printf("Same flavored sequence!\n");
         };
 
         UVM_OBJECT_PARAM_UTILS(same_flavored_jelly_beans_sequence<REQ,RSP>);
 
         void body()
         {
+            jelly_bean_transaction * jb_tx;
+            jb_tx           = new REQ();
+            jb_tx->randomize();
+            Flavor flavor = jb_tx->flavor;
+            delete jb_tx;
             
             for(int i = 0; i < num_jelly_beans; i++ )
             {
                 jelly_bean_transaction * jb_tx;
                 jb_tx           = new REQ();
-                jb_tx->color    = Color::BLUE;
-                jb_tx->flavor   = Flavor::APPLE;
-                jb_tx->taste    = Taste::YUCKY;
 
                 this->wait_for_grant();
+                jb_tx->randomize(); jb_tx->flavor = flavor;
                 this->send_request(jb_tx);
+                // UVM_INFO(this->get_name(), "Sent request", uvm::UVM_NONE);
+                // jb_tx->print();
+
                 // this->get_response(rsp);
-
-                std::ostringstream str;
-                str << " my_id %d" << my_id;
-
-                UVM_INFO(this->get_name(), str.str(), uvm::UVM_NONE);
-                printf(" my_id %d", my_id);
-
                 delete jb_tx;
             }
         }
@@ -163,6 +154,41 @@ namespace uvm {
     int same_flavored_jelly_beans_sequence<REQ,RSP>::g_my_id = 1;
 
 
+template <typename REQ = uvm::jelly_bean_transaction, typename RSP = REQ>
+    class gift_boxed_jelly_beans_sequence  : public uvm_sequence<REQ,RSP>
+    {
+        private:
+            int num_jelly_beans = 2;
+            int my_id;
+            static int g_my_id;
+        
+        public:
+        gift_boxed_jelly_beans_sequence( const std::string& name_ ) : uvm::uvm_sequence<REQ,RSP>( name_ )
+        {
+            my_id = g_my_id++;
+        };
+
+        UVM_OBJECT_PARAM_UTILS(gift_boxed_jelly_beans_sequence<REQ,RSP>);
+
+        void body()
+        {      
+            same_flavored_jelly_beans_sequence<> * jb_seq;  
+            for(int i = 0; i < num_jelly_beans; i++ )
+            {
+                jb_seq = same_flavored_jelly_beans_sequence<>::type_id::create("sequence");
+                jb_seq->print();
+                jb_seq->start(this->m_sequencer);
+
+                // UVM_INFO(this->get_name(), "Sent request", uvm::UVM_NONE);
+                
+
+                // this->get_response(rsp);
+            }
+        }
+    };
+
+template <typename REQ, typename RSP>
+    int gift_boxed_jelly_beans_sequence<REQ,RSP>::g_my_id = 1;
 // ------------------------
 // Sequencer
 // ------------------------
@@ -262,10 +288,10 @@ public:
 
     virtual void run_phase(uvm::uvm_phase& phase)
     {
-        one_jelly_bean_sequence<> * sequence;
+        gift_boxed_jelly_beans_sequence<> * sequence;
 
         // Create and start the sequence
-        sequence = one_jelly_bean_sequence<>::type_id::create("sequence");
+        sequence = gift_boxed_jelly_beans_sequence<>::type_id::create("sequence");
         sequence->start(sqr);
     }
 };
