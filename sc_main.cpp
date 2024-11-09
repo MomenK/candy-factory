@@ -297,21 +297,102 @@ public:
 };
 
 // ------------------------
-// subscriber
+// subscriber & scoreboard
 // ------------------------
-template < typename REQ = uvm::jelly_bean_transaction,  typename RSP = REQ >
-class jelly_bean_subscriber : public uvm_subscriber<REQ> {
+// Templated subscriber class
+template <typename REQ = uvm::jelly_bean_transaction, typename RSP = REQ>
+class jelly_bean_sb_subscriber : public uvm_subscriber<REQ> {
 public:
+    UVM_COMPONENT_UTILS(jelly_bean_sb_subscriber);
+
     // Constructor
-    UVM_COMPONENT_UTILS(jelly_bean_subscriber);
+    jelly_bean_sb_subscriber(uvm_component_name name) : uvm_subscriber<REQ>(name) {}
 
-    jelly_bean_subscriber(uvm_component_name name) : uvm_subscriber<REQ>(name) {}
+    // Override write method to receive transactions
+    virtual void write(const REQ& trans) override;
+};
 
-    // Write method to receive transactions from the analysis port
-    virtual void write(const REQ& trans) override {
-        // Print received transaction for debugging
+// Templated scoreboard class
+template <typename REQ = uvm::jelly_bean_transaction, typename RSP = REQ>
+class jelly_bean_scoreboard : public uvm_scoreboard {
+public:
+    UVM_COMPONENT_UTILS(jelly_bean_scoreboard);
+
+    jelly_bean_sb_subscriber<REQ, RSP>* sub;
+    uvm_analysis_export<REQ> ap;
+
+    // Constructor
+    jelly_bean_scoreboard(uvm_component_name name)
+        : uvm_scoreboard(name), ap("ap") {}
+
+    // Build phase to instantiate the subscriber
+    virtual void build_phase(uvm_phase& phase) override;
+
+    // Connect phase to connect the subscriber to the analysis port
+    virtual void connect_phase(uvm_phase& phase) override;
+
+    // Method to check the quality of the jelly bean transaction
+    virtual void check_jelly_bean_taste(const REQ& jb_tx);
+};
+
+// Implementation of subscriber's write method
+template <typename REQ, typename RSP>
+void jelly_bean_sb_subscriber<REQ, RSP>::write(const REQ& trans) {
+    // Retrieve the scoreboard instance
+    auto* sb = dynamic_cast<jelly_bean_scoreboard<REQ, RSP>*>(this->get_parent());
+    if (sb) {
         UVM_INFO(this->get_name(), "Received transaction in subscriber", UVM_MEDIUM);
         trans.print();
+        sb->check_jelly_bean_taste(trans);
+    } else {
+        UVM_FATAL(this->get_name(), "Failed to cast parent to scoreboard.");
+    }
+}
+
+// Implementation of scoreboard's build_phase
+template <typename REQ, typename RSP>
+void jelly_bean_scoreboard<REQ, RSP>::build_phase(uvm_phase& phase) {
+    sub = jelly_bean_sb_subscriber<REQ, RSP>::type_id::create("subscriber", this);
+    if (!sub) {
+        UVM_FATAL(this->get_name(), "Failed to create subscriber.");
+    }
+}
+
+// Implementation of scoreboard's connect_phase
+template <typename REQ, typename RSP>
+void jelly_bean_scoreboard<REQ, RSP>::connect_phase(uvm_phase& phase) {
+    this->ap.connect(sub->analysis_export);
+}
+
+// Implementation of the check_jelly_bean_taste method
+template <typename REQ, typename RSP>
+void jelly_bean_scoreboard<REQ, RSP>::check_jelly_bean_taste(const REQ& jb_tx) {
+    UVM_INFO(this->get_name(), "!! QUALITY CHECK !!", UVM_MEDIUM);
+}
+
+// ------------------------
+// Environment
+// ------------------------
+template < typename REQ = uvm::jelly_bean_transaction,  typename RSP = REQ >
+class jelly_bean_env : public uvm::uvm_env
+{
+public:
+    UVM_COMPONENT_UTILS(jelly_bean_env);
+
+    jelly_bean_agent<>*    agent;
+    jelly_bean_scoreboard<>*    sb;
+
+    jelly_bean_env ( uvm::uvm_component_name name ) :  uvm_env(name) {}
+
+    virtual void build_phase(uvm_phase& phase) override 
+    {
+        agent = jelly_bean_agent<>::type_id::create("agent", this);
+        sb   = jelly_bean_scoreboard<>::type_id::create("scoreboard", this);
+    }
+
+    virtual void connect_phase(uvm_phase& phase) override 
+    {
+        agent->mon->ap.connect(sb->ap);
     }
 };
 
@@ -327,8 +408,7 @@ public:
         // jelly_bean_sequencer<> * sequencer;
         // jelly_bean_driver<>*    driver;
         //OR
-        jelly_bean_agent<>*    agent;
-        jelly_bean_subscriber<>*    sub;
+        jelly_bean_env<>*    env;
 
         //constructor
         my_test(uvm_component_name name) : uvm_test(name) {}
@@ -342,16 +422,15 @@ public:
             // sequencer = jelly_bean_sequencer<>::type_id::create("sequencer", this);
             // driver = jelly_bean_driver<>::type_id::create("slave", this);
             //OR
-            agent = jelly_bean_agent<>::type_id::create("agent", this);
-            sub   = jelly_bean_subscriber<>::type_id::create("subscribe", this);
+            env = jelly_bean_env<>::type_id::create("Env", this);
         }
 
-        void connect_phase(uvm::uvm_phase& phase)
-        {   
-            // Move to agent!!
-            // driver->seq_item_port(sequencer->seq_item_export);
-            agent->mon->ap.connect(sub->analysis_export);
-        }
+        // void connect_phase(uvm::uvm_phase& phase)
+        // {   
+        //     // Move to agent!!
+        //     // driver->seq_item_port(sequencer->seq_item_export);
+        //     agent->mon->ap.connect(sb->ap);
+        // }
 
         virtual void run_phase(uvm_phase& phase) override {
             // Start the phase
