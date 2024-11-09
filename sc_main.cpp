@@ -1,7 +1,7 @@
 #include <time.h> 
 #include<systemc>
 #include <uvm>
-
+using namespace sc_core;
 enum class Flavor : uint8_t {
     NO_FLAVOR = 0,
     APPLE,
@@ -26,6 +26,30 @@ enum class Taste : uint8_t {
 
 namespace uvm {
 // ------------------------
+// IF
+// ------------------------
+class jelly_bean_if : public sc_interface {
+public:
+    sc_signal<bool> clk;       // Clock signal
+    sc_signal<int> flavor;     // Flavor of the jelly bean
+    sc_signal<int> color;      // Color of the jelly bean
+    sc_signal<bool> sugar_free; // Indicates if the jelly bean is sugar-free
+    sc_signal<bool> sour;      // Indicates if the jelly bean is sour
+    sc_signal<int> taste;      // Taste quality of the jelly bean
+
+    jelly_bean_if() {}
+
+    // Clock generator method
+    // void generate_clock(sc_time period = 10, double duty_cycle = 0.5) {
+    //     while (true) {
+    //         clk.write(true);  // Clock high
+    //         wait(period * duty_cycle); // Wait for high phase
+    //         clk.write(false); // Clock low
+    //         wait(period * (1.0 - duty_cycle)); // Wait for low phase
+    //     }
+    // }
+};
+// ------------------------
 // Transcation
 // ------------------------
     class jelly_bean_transaction : public uvm_sequence_item
@@ -33,8 +57,9 @@ namespace uvm {
         public:
         Flavor  flavor;
         Color   color;
-        Taste   taste;
         bool    sugar_free;
+        bool    sour;
+        Taste   taste;
 
         public:
         jelly_bean_transaction(const std::string& name_ = "jelly_bean_seq_item" ) : uvm_sequence_item( name_ )    {};
@@ -47,8 +72,9 @@ namespace uvm {
             srand (time(NULL));
             flavor  = static_cast<Flavor>   (rand() % 5 );
             color   = static_cast<Color>    (rand() % 3 );
-            taste   = static_cast<Taste>    (rand() % 3 );
+            // taste   = static_cast<Taste>    (rand() % 3 );
             sugar_free =  (rand() % 2 );
+            sour =  (rand() % 2 );
         }
 
         // Print method
@@ -56,8 +82,9 @@ namespace uvm {
         {
             printer.print_field_int("Flavor",static_cast<int>(flavor));
             printer.print_field_int("Color", static_cast<int>(color));
-            printer.print_field_int("Taste", static_cast<int>(taste));
+            // printer.print_field_int("Taste", static_cast<int>(taste));
             printer.print_field_int("Sugar", sugar_free);
+            printer.print_field_int("Sour", sour);
         }
     };
 
@@ -170,6 +197,12 @@ template <typename REQ = uvm::jelly_bean_transaction, typename RSP = REQ>
 
         UVM_OBJECT_PARAM_UTILS(gift_boxed_jelly_beans_sequence<REQ,RSP>);
 
+        void randomize()
+        {
+            srand (time(NULL));
+            num_jelly_beans = (rand() % 5 );
+        }
+
         void body()
         {      
             same_flavored_jelly_beans_sequence<> * jb_seq;  
@@ -227,7 +260,14 @@ class jelly_bean_driver : public uvm::uvm_driver <REQ,RSP>
 public:
     jelly_bean_driver ( uvm::uvm_component_name name ) :  uvm::uvm_driver<REQ,RSP>( name ) {}
 
+    jelly_bean_if* jb_vi;
+
     UVM_COMPONENT_PARAM_UTILS(jelly_bean_driver<REQ,RSP>);
+
+    void build_phase(uvm_phase& phase)
+    {
+       uvm_config_db<jelly_bean_if*>::get(this, "*", "vif", jb_vi);
+    }
 
     void run_phase(uvm_phase& phase)
     {
@@ -286,14 +326,6 @@ public:
         // drv->seqr_port.connect(sqr->seq_item_export);
     }
 
-    virtual void run_phase(uvm::uvm_phase& phase)
-    {
-        gift_boxed_jelly_beans_sequence<> * sequence;
-
-        // Create and start the sequence
-        sequence = gift_boxed_jelly_beans_sequence<>::type_id::create("sequence");
-        sequence->start(sqr);
-    }
 };
 
 // ------------------------
@@ -397,46 +429,113 @@ public:
 };
 
 // ------------------------
-// Test
+// Configuration
 // ------------------------
 
-    class my_test : public uvm_test 
+class jelly_bean_configuration : public uvm_object
+{
+public:
+    UVM_OBJECT_UTILS(jelly_bean_configuration);
+
+    jelly_bean_configuration (const std::string& name_ = "") : uvm_object ( name_ ) {}
+
+};
+
+// ------------------------
+// DUT
+// ------------------------
+SC_MODULE(jelly_bean_taster)
+{
+    public:
+    sc_in<bool> clk;
+    sc_in<int> color;
+    sc_in<int> flavor;
+    sc_in<bool> sour;
+    sc_in<bool> sugar_free;
+
+
+    sc_out<int> taste;
+
+    SC_CTOR(jelly_bean_taster) {
+        SC_METHOD(tasting);
+        sensitive << clk.pos(); // Trigger on positive edge of the clock
+        dont_initialize();
+    }
+
+    // private:
+    void tasting()
+    {
+        if (flavor.read() == (int)(Flavor::CHOCOLATE) && sour.read())
+            taste.write((int)(Taste::YUCKY));
+        else
+            taste.write((int)(Taste::YUMMY));
+    }
+};
+
+// ------------------------
+// Test
+// ------------------------
+    class jelly_bean_test : public uvm_test 
     {
     public:
-        UVM_COMPONENT_UTILS(my_test);
+        UVM_COMPONENT_UTILS(jelly_bean_test);
         // Declare the sequencer pointer
         // jelly_bean_sequencer<> * sequencer;
         // jelly_bean_driver<>*    driver;
         //OR
         jelly_bean_env<>*    env;
+        jelly_bean_taster*   dut;
+        jelly_bean_if*       jb_if;
+        sc_clock* clk;
 
         //constructor
-        my_test(uvm_component_name name) : uvm_test(name) {}
+        jelly_bean_test(uvm_component_name name) : uvm_test(name) {}
 
         // Build phase to instantiate the sequencer
         virtual void build_phase(uvm_phase& phase) override 
         {
             uvm_test::build_phase(phase);
 
-            // Instantiate the sequencer
-            // sequencer = jelly_bean_sequencer<>::type_id::create("sequencer", this);
-            // driver = jelly_bean_driver<>::type_id::create("slave", this);
-            //OR
-            env = jelly_bean_env<>::type_id::create("Env", this);
-        }
+            jelly_bean_configuration * jb_cfg = jelly_bean_configuration::type_id::create("jb_cfg");
+             // Set configuration via uvm_config_db
+            uvm_config_db<jelly_bean_configuration*>::set(this, "*", "config", jb_cfg);
 
-        // void connect_phase(uvm::uvm_phase& phase)
-        // {   
-        //     // Move to agent!!
-        //     // driver->seq_item_port(sequencer->seq_item_export);
-        //     agent->mon->ap.connect(sb->ap);
-        // }
+            //transcation override
+            jelly_bean_transaction::type_id::set_type_override(          sugar_free_jelly_bean_transaction::get_type());
+
+            //create environment
+            env = jelly_bean_env<>::type_id::create("Env", this);
+
+            jb_if = new jelly_bean_if();
+            uvm_config_db<jelly_bean_if*>::set(this, "*", "vif", jb_if);
+            dut = new jelly_bean_taster("dut");
+
+            // clk = new sc_core::sc_clock("clk", 10, sc_core::SC_NS);
+            // jb_if->clk(*clk);
+
+            dut->clk(jb_if->clk);
+            dut->flavor(jb_if->flavor);
+            dut->taste(jb_if->taste);
+            dut->color(jb_if->color);
+            dut->sour(jb_if->sour);
+            dut->sugar_free(jb_if->sugar_free);
+
+
+        }
 
         virtual void run_phase(uvm_phase& phase) override {
             // Start the phase
             phase.raise_objection(this);
 
             printf("\nRunning\n");
+
+            gift_boxed_jelly_beans_sequence<> * sequence;
+
+            // // Create and start the sequence
+            sequence = gift_boxed_jelly_beans_sequence<>::type_id::create("sequence");
+            sequence->randomize();
+            sequence->start(env->agent->sqr);
+            UVM_INFO(this->get_name(), "jelly_bean_test", UVM_LOW);
 
             // Move to agent!
             // Pointer to the sequence
@@ -453,6 +552,9 @@ public:
 
 }
 
+// ------------------------
+// Top/Main
+// ------------------------
 int sc_main(int, char*[])
 {
     sc_core::sc_set_time_resolution( 1, sc_core::SC_FS );
@@ -460,8 +562,9 @@ int sc_main(int, char*[])
     // uvm::sugar_free_jelly_bean_transaction * my_bean;
     // my_bean = new uvm::sugar_free_jelly_bean_transaction();
     // delete my_bean;
+    //top is here
 
-    uvm::run_test("my_test");
+    uvm::run_test("jelly_bean_test");
 
     return 0;
 }
