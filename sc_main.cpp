@@ -2,27 +2,14 @@
 #include<systemc>
 #include <uvm>
 using namespace sc_core;
-enum class Flavor : uint8_t {
-    NO_FLAVOR = 0,
-    APPLE,
-    BLUEBERRY,
-    BUBBLE_GUM,
-    CHOCOLATE
-};
+//     UNKNOWN = 0,
+//     YUMMY,
+//     YUCKY
+// };
 
-// Define color_e with specific values
-enum class Color : uint8_t {
-    RED = 0,
-    GREEN,
-    BLUE
-};
-
-// Define taste_e with specific values
-enum class Taste : uint8_t {
-    UNKNOWN = 0,
-    YUMMY,
-    YUCKY
-};
+typedef enum { NO_FLAVOR, APPLE, BLUEBERRY, BUBBLE_GUM, CHOCOLATE } Flavor;
+typedef enum { RED, GREEN, BLUE } Color;
+typedef enum { UNKNOWN, YUMMY, YUCKY } Taste;
 
 namespace uvm {
 // ------------------------
@@ -30,24 +17,25 @@ namespace uvm {
 // ------------------------
 class jelly_bean_if : public sc_interface {
 public:
-    sc_signal<bool> clk;       // Clock signal
-    sc_signal<int> flavor;     // Flavor of the jelly bean
-    sc_signal<int> color;      // Color of the jelly bean
-    sc_signal<bool> sugar_free; // Indicates if the jelly bean is sugar-free
-    sc_signal<bool> sour;      // Indicates if the jelly bean is sour
-    sc_signal<int> taste;      // Taste quality of the jelly bean
+    sc_signal<Flavor> flavor;
+    sc_signal<Color> color;
+    sc_signal<bool> sugar_free;
+    sc_signal<bool> sour;
+    sc_signal<Taste> taste;
+    sc_signal<bool> clk;
 
-    jelly_bean_if() {}
+    SC_HAS_PROCESS(jelly_bean_if);
 
-    // Clock generator method
-    // void generate_clock(sc_time period = 10, double duty_cycle = 0.5) {
-    //     while (true) {
-    //         clk.write(true);  // Clock high
-    //         wait(period * duty_cycle); // Wait for high phase
-    //         clk.write(false); // Clock low
-    //         wait(period * (1.0 - duty_cycle)); // Wait for low phase
-    //     }
-    // }
+    jelly_bean_if() { }
+
+    void generate_clock() {
+        while (true) {
+            clk.write(true);
+            wait(1, sc_core::SC_NS); // High phase
+            clk.write(false);
+            wait(1, sc_core::SC_NS); // High phase
+        }
+    }
 };
 // ------------------------
 // Transcation
@@ -185,7 +173,7 @@ template <typename REQ = uvm::jelly_bean_transaction, typename RSP = REQ>
     class gift_boxed_jelly_beans_sequence  : public uvm_sequence<REQ,RSP>
     {
         private:
-            int num_jelly_beans = 2;
+            int num_jelly_beans = 10;
             int my_id;
             static int g_my_id;
         
@@ -266,7 +254,9 @@ public:
 
     void build_phase(uvm_phase& phase)
     {
-       uvm_config_db<jelly_bean_if*>::get(this, "*", "vif", jb_vi);
+        if (!uvm_config_db<jelly_bean_if*>::get(nullptr, "", "vif", jb_vi)) {
+            UVM_FATAL("DRIVER", "Virtual interface not set");
+        }
     }
 
     void run_phase(uvm_phase& phase)
@@ -280,14 +270,20 @@ public:
         for(;;)
         {
             this->seq_item_port->get_next_item(req); // or alternative this->seq_item_port->peek(req)
-            rsp.set_id_info(req);
+            
             // write to dut
-
+            jb_vi->flavor.write(req.flavor);
+            jb_vi->color.write(req.color);
+            jb_vi->sugar_free.write(req.sugar_free);
+            jb_vi->sour.write(req.sour);
             // write to mon
             mon->ap.write(req);
-
-
+            
+            wait(jb_vi->clk.posedge_event());
             this->seq_item_port->item_done(); // or alternative this->seq_item_port->get(tmp) to flush item from fifo
+
+
+            rsp.set_id_info(req);
             this->seq_item_port->put_response(rsp);  // or alternative: this->seq_item_port->put(rsp)
         }
     }
@@ -441,36 +437,7 @@ public:
 
 };
 
-// ------------------------
-// DUT
-// ------------------------
-SC_MODULE(jelly_bean_taster)
-{
-    public:
-    sc_in<bool> clk;
-    sc_in<int> color;
-    sc_in<int> flavor;
-    sc_in<bool> sour;
-    sc_in<bool> sugar_free;
 
-
-    sc_out<int> taste;
-
-    SC_CTOR(jelly_bean_taster) {
-        SC_METHOD(tasting);
-        sensitive << clk.pos(); // Trigger on positive edge of the clock
-        dont_initialize();
-    }
-
-    // private:
-    void tasting()
-    {
-        if (flavor.read() == (int)(Flavor::CHOCOLATE) && sour.read())
-            taste.write((int)(Taste::YUCKY));
-        else
-            taste.write((int)(Taste::YUMMY));
-    }
-};
 
 // ------------------------
 // Test
@@ -479,12 +446,9 @@ SC_MODULE(jelly_bean_taster)
     {
     public:
         UVM_COMPONENT_UTILS(jelly_bean_test);
-        // Declare the sequencer pointer
-        // jelly_bean_sequencer<> * sequencer;
-        // jelly_bean_driver<>*    driver;
-        //OR
+
         jelly_bean_env<>*    env;
-        jelly_bean_taster*   dut;
+        // jelly_bean_taster*   dut;
         jelly_bean_if*       jb_if;
         sc_clock* clk;
 
@@ -505,66 +469,84 @@ SC_MODULE(jelly_bean_taster)
 
             //create environment
             env = jelly_bean_env<>::type_id::create("Env", this);
-
-            jb_if = new jelly_bean_if();
-            uvm_config_db<jelly_bean_if*>::set(this, "*", "vif", jb_if);
-            dut = new jelly_bean_taster("dut");
-
-            // clk = new sc_core::sc_clock("clk", 10, sc_core::SC_NS);
-            // jb_if->clk(*clk);
-
-            dut->clk(jb_if->clk);
-            dut->flavor(jb_if->flavor);
-            dut->taste(jb_if->taste);
-            dut->color(jb_if->color);
-            dut->sour(jb_if->sour);
-            dut->sugar_free(jb_if->sugar_free);
-
-
         }
 
         virtual void run_phase(uvm_phase& phase) override {
             // Start the phase
             phase.raise_objection(this);
 
-            printf("\nRunning\n");
-
+            // Create and start the sequence
             gift_boxed_jelly_beans_sequence<> * sequence;
-
-            // // Create and start the sequence
             sequence = gift_boxed_jelly_beans_sequence<>::type_id::create("sequence");
             sequence->randomize();
             sequence->start(env->agent->sqr);
             UVM_INFO(this->get_name(), "jelly_bean_test", UVM_LOW);
 
-            // Move to agent!
-            // Pointer to the sequence
-            // one_jelly_bean_sequence<> * sequence;
-
-            // // Create and start the sequence
-            // sequence = one_jelly_bean_sequence<>::type_id::create("sequence");
-            // sequence->start(sequencer);
-
-            // Drop the phase objection after the sequence is complete
             phase.drop_objection(this);
         }
     };
-
 }
+
+// ------------------------
+// DUT
+// ------------------------
+SC_MODULE(jelly_bean_taster)
+{
+    public:
+    sc_in<bool> clk;
+    sc_in<Color> color;
+    sc_in<Flavor> flavor;
+    sc_in<bool> sour;
+    sc_in<bool> sugar_free;
+
+    sc_out<Taste> taste;
+
+    SC_CTOR(jelly_bean_taster) {
+        SC_METHOD(tasting);
+        sensitive << clk.pos(); // Trigger on positive edge of the clock
+        dont_initialize();
+    }
+
+    // private:
+    void tasting()
+    {
+        if ((flavor.read() == Flavor::CHOCOLATE) && sour.read())
+            taste.write(Taste::YUCKY);
+        else
+            taste.write(Taste::YUMMY);
+        
+        std::cout << "Taste updated at: " << sc_time_stamp() << std::endl;
+
+    }
+};
 
 // ------------------------
 // Top/Main
 // ------------------------
 int sc_main(int, char*[])
 {
-    sc_core::sc_set_time_resolution( 1, sc_core::SC_FS );
+// Set time resolution
+    sc_core::sc_set_time_resolution(1, sc_core::SC_FS);
 
-    // uvm::sugar_free_jelly_bean_transaction * my_bean;
-    // my_bean = new uvm::sugar_free_jelly_bean_transaction();
-    // delete my_bean;
-    //top is here
+    // Create the virtual interface
+    uvm::jelly_bean_if * vif = new uvm::jelly_bean_if();
 
-    uvm::run_test("jelly_bean_test");
+    // Instantiate the DUT
+    jelly_bean_taster * dut = new jelly_bean_taster("dut");
+    dut->clk(vif->clk);
+    dut->flavor(vif->flavor);
+    dut->color(vif->color);
+    dut->sugar_free(vif->sugar_free);
+    dut->sour(vif->sour);
+    dut->taste(vif->taste);
+
+    uvm::uvm_config_db<uvm::jelly_bean_if*>::set(nullptr, "", "vif", vif);
+
+    sc_spawn_options spawn_opts;
+    sc_spawn([vif]() { vif->generate_clock(); }, "clock_generator", &spawn_opts);
+
+    uvm::jelly_bean_test* test = uvm::jelly_bean_test::type_id::create("test");
+    uvm::run_test();
 
     return 0;
 }
